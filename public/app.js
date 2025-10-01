@@ -7,8 +7,11 @@ const configuration = {
       urls: [
         'stun:stun1.l.google.com:19302',
         'stun:stun2.l.google.com:19302',
+        'turn:relay1.expressturn.com:3478'
       ],
-    },
+      username: 'efb1b1e0',
+      credential: 'efb1b1e0'
+    }
   ],
   iceCandidatePoolSize: 10,
 };
@@ -38,36 +41,71 @@ async function createRoom() {
   registerPeerConnectionListeners();
 
   // Add code for creating a room here
-  
-  // Code for creating room above
-  
+  const roomRef = await db.collection('rooms').doc();
+  roomId = roomRef.id;
+  document.querySelector('#currentRoom').innerText = `Current room is ${roomId} - You are the caller!`;
+
   localStream.getTracks().forEach(track => {
+    console.log('Adding local track:', track);
     peerConnection.addTrack(track, localStream);
   });
 
-  // Code for creating a room below
+  // Collect ICE candidates and store in Firestore
+  const callerCandidatesCollection = roomRef.collection('callerCandidates');
+  peerConnection.addEventListener('icecandidate', event => {
+    if (event.candidate) {
+      callerCandidatesCollection.add(event.candidate.toJSON());
+    }
+  });
 
-  // Code for creating a room above
+  // Create offer and set local description
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
 
-  // Code for collecting ICE candidates below
+  const roomWithOffer = {
+    offer: {
+      type: offer.type,
+      sdp: offer.sdp,
+    },
+  };
+  await roomRef.set(roomWithOffer);
+  console.log(`New room created with SDP offer. Room ID: ${roomRef.id}`);
 
-  // Code for collecting ICE candidates above
+  // Listen for remote answer
+  roomRef.onSnapshot(async snapshot => {
+    const data = snapshot.data();
+    if (!peerConnection.currentRemoteDescription && data && data.answer) {
+      const answer = new RTCSessionDescription(data.answer);
+      await peerConnection.setRemoteDescription(answer);
+      console.log('Remote description set with answer.');
+    }
+  });
 
-  peerConnection.addEventListener('track', event => {
-    console.log('Got remote track:', event.streams[0]);
-    event.streams[0].getTracks().forEach(track => {
-      console.log('Add a track to the remoteStream:', track);
-      remoteStream.addTrack(track);
+  // Listen for remote ICE candidates
+  roomRef.collection('calleeCandidates').onSnapshot(snapshot => {
+    snapshot.docChanges().forEach(change => {
+      if (change.type === 'added') {
+        const candidate = new RTCIceCandidate(change.doc.data());
+        peerConnection.addIceCandidate(candidate);
+      }
     });
   });
 
-  // Listening for remote session description below
 
-  // Listening for remote session description above
+  peerConnection.addEventListener('track', event => {
+    console.log('Brij- Got remote track:', event.streams[0]);
+    if (event.streams[0]) {
+      console.log('Brij- Remote stream tracks:', event.streams[0].getTracks());
+      document.querySelector('#remoteVideo').srcObject = event.streams[0];
+    } else {
+      console.log('Brij- No remote stream in event');
+    }
+  });
 
-  // Listen for remote ICE candidates below
-
-  // Listen for remote ICE candidates above
+  // peerConnection.addEventListener('track', event => {
+  //   console.log('Got remote track:', event.streams[0]);
+  //   document.querySelector('#remoteVideo').srcObject = event.streams[0];
+  // });
 }
 
 function joinRoom() {
@@ -99,25 +137,43 @@ async function joinRoomById(roomId) {
       peerConnection.addTrack(track, localStream);
     });
 
-    // Code for collecting ICE candidates below
-
-    // Code for collecting ICE candidates above
+    // Collect ICE candidates and store in Firestore (callee)
+    const calleeCandidatesCollection = roomRef.collection('calleeCandidates');
+    peerConnection.addEventListener('icecandidate', event => {
+      if (event.candidate) {
+        calleeCandidatesCollection.add(event.candidate.toJSON());
+      }
+    });
 
     peerConnection.addEventListener('track', event => {
       console.log('Got remote track:', event.streams[0]);
-      event.streams[0].getTracks().forEach(track => {
-        console.log('Add a track to the remoteStream:', track);
-        remoteStream.addTrack(track);
-      });
+      document.querySelector('#remoteVideo').srcObject = event.streams[0];
     });
 
-    // Code for creating SDP answer below
+    // Get offer from Firestore and set as remote description
+    const offer = roomSnapshot.data().offer;
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    // Create answer
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    // Store answer in Firestore
+    const roomWithAnswer = {
+      answer: {
+        type: answer.type,
+        sdp: answer.sdp,
+      },
+    };
+    await roomRef.update(roomWithAnswer);
 
-    // Code for creating SDP answer above
-
-    // Listening for remote ICE candidates below
-
-    // Listening for remote ICE candidates above
+    // Listen for remote ICE candidates from caller
+    roomRef.collection('callerCandidates').onSnapshot(snapshot => {
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const candidate = new RTCIceCandidate(change.doc.data());
+          peerConnection.addIceCandidate(candidate);
+        }
+      });
+    });
   }
 }
 
