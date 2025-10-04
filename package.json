@@ -1,5 +1,10 @@
 {
-  "dependencies": {
+
+  "name": "expats-webrtc",
+  "scripts": {
+    "start": "node app.js"
+  },
+    "dependencies": {
     "ws": "^8.18.3"
   }
 }
