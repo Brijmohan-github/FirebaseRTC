@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>WebRTC P2P Test</title>
+</head>
+<body>
+<h2>WebRTC P2P Demo</h2>
+
+<script>
+    const ws = new WebSocket("wss://firebasertc-xvqv.onrender.com:9000/");
+
+    ws.onopen = () => {
+        console.log("✅ Connected to WebSocket server");
+        ws.send("Hello Server");
+    };
+
+    ws.onmessage = (event) => {
+        console.log("📩 Message from server:", event.data);
+    };
+
+    ws.onerror = (error) => {
+        console.error("❌ WebSocket Error:", error);
+    };
+
+    ws.onclose = () => {
+        console.log("🔌 WebSocket connection closed");
+    };
+    </script>
+</body>
+</html>
