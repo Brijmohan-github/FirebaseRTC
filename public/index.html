@@ -1,79 +1,119 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Welcome to FirebaseRTC</title>
-    <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
-    <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
-
-    <!-- update the version number as needed -->
-    <script defer src="/__/firebase/7.13.1/firebase-app.js"></script>
-    <!-- include only the Firebase features as you need -->
-    <script defer src="/__/firebase/7.13.1/firebase-firestore.js"></script>
-    <!-- initialize the SDK after all desired features are loaded -->
-    <script defer src="/__/firebase/init.js"></script>
-
-    <link rel="stylesheet" type="text/css" href="main.css">
+  <meta charset="utf-8" />
+  <title>WebRTC P2P Test</title>
 </head>
 <body>
-<h1>Welcome to FirebaseRTC!</h1>
-<div id="buttons">
-    <button class="mdc-button mdc-button--raised" id="cameraBtn">
-        <i class="material-icons mdc-button__icon" aria-hidden="true">perm_camera_mic</i>
-        <span class="mdc-button__label">Open camera & microphone</span>
-    </button>
-    <button class="mdc-button mdc-button--raised" disabled id="createBtn">
-        <i class="material-icons mdc-button__icon" aria-hidden="true">group_add</i>
-        <span class="mdc-button__label">Create room</span>
-    </button>
-    <button class="mdc-button mdc-button--raised" disabled id="joinBtn">
-        <i class="material-icons mdc-button__icon" aria-hidden="true">group</i>
-        <span class="mdc-button__label">Join room</span>
-    </button>
-    <button class="mdc-button mdc-button--raised" disabled id="hangupBtn">
-        <i class="material-icons mdc-button__icon" aria-hidden="true">close</i>
-        <span class="mdc-button__label">Hangup</span>
-    </button>
-</div>
-<div>
-    <span id="currentRoom"></span>
-</div>
-<div id="videos">
-    <video id="localVideo" muted autoplay playsinline></video>
-    <video id="remoteVideo" autoplay playsinline></video>
-</div>
-<div class="mdc-dialog"
-     id="room-dialog"
-     role="alertdialog"
-     aria-modal="true"
-     aria-labelledby="my-dialog-title"
-     aria-describedby="my-dialog-content">
-    <div class="mdc-dialog__container">
-        <div class="mdc-dialog__surface">
-            <h2 class="mdc-dialog__title" id="my-dialog-title">Join room</h2>
-            <div class="mdc-dialog__content" id="my-dialog-content">
-                Enter ID for room to join:
-                <div class="mdc-text-field">
-                    <input type="text" id="room-id" class="mdc-text-field__input">
-                    <label class="mdc-floating-label" for="room-id">Room ID</label>
-                    <div class="mdc-line-ripple"></div>
-                </div>
-            </div>
-            <footer class="mdc-dialog__actions">
-                <button type="button" class="mdc-button mdc-dialog__button" data-mdc-dialog-action="no">
-                    <span class="mdc-button__label">Cancel</span>
-                </button>
-                <button id="confirmJoinBtn" type="button" class="mdc-button mdc-dialog__button"
-                        data-mdc-dialog-action="yes">
-                    <span class="mdc-button__label">Join</span>
-                </button>
-            </footer>
-        </div>
-    </div>
-    <div class="mdc-dialog__scrim"></div>
-</div>
-<script src="app.js"></script>
+  <h2>WebRTC P2P Demo</h2>
+  <video id="localVideo" autoplay playsinline muted></video>
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <script>
+    const room = "room1"; // fixed room ID (can make dynamic)
+    const signalingServerUrl = "ws://localhost:9000";
+
+    let ws, peerConnection, localStream;
+
+    // 1. Setup WebSocket connection
+    ws = new WebSocket(signalingServerUrl);
+
+    ws.onopen = () => {
+      console.log("Connected to signaling server");
+    };
+
+    ws.onmessage = async (message) => {
+      let data = JSON.parse(message.data);
+      console.log("Got message", data);
+
+      if (data.type === "offer") {
+        await handleOffer(data.offer);
+      } else if (data.type === "answer") {
+        await handleAnswer(data.answer);
+      } else if (data.type === "candidate") {
+        if (data.candidate) {
+          try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+            console.log("Added ICE candidate");
+          } catch (e) {
+            console.error("Error adding received ice candidate", e);
+          }
+        }
+      }
+    };
+
+    // 2. Create Peer Connection
+    async function createPeerConnection() {
+      peerConnection = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+
+      // Send ICE candidates to signaling server
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          sendMessage({
+            type: "candidate",
+            room,
+            candidate: event.candidate
+          });
+        }
+      };
+
+      // When remote track arrives, show it
+      peerConnection.ontrack = (event) => {
+        document.getElementById("remoteVideo").srcObject = event.streams[0];
+      };
+
+      // Get local media
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      document.getElementById("localVideo").srcObject = localStream;
+
+      // Add local tracks
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+    }
+
+    // 3. Handle Offer
+    async function handleOffer(offer) {
+      if (!peerConnection) await createPeerConnection();
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+
+      sendMessage({
+        type: "answer",
+        room,
+        answer
+      });
+    }
+
+    // 4. Handle Answer
+    async function handleAnswer(answer) {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    }
+
+    // 5. Create an offer (initiator)
+    async function startCall() {
+      await createPeerConnection();
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      sendMessage({
+        type: "offer",
+        room,
+        offer
+      });
+    }
+
+    // Helper: Send messages to signaling server
+    function sendMessage(msg) {
+      ws.send(JSON.stringify(msg));
+    }
+
+    // Auto-start a call after connecting
+    ws.onopen = () => {
+      console.log("Connected to signaling server");
+      setTimeout(startCall, 2000); // small delay so both clients join
+    };
+  </script>
 </body>
 </html>

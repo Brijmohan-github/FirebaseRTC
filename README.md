@@ -44,12 +44,51 @@ A simple WebRTC video chat application using Firebase for signaling.
 - The other user clicks "Join room" and enters the room ID.
 - Both users should see each other's video.
 
-## Troubleshooting
 
-- Ensure camera/microphone permissions are granted.
-- Check browser console for errors.
-- Verify Firebase configuration and Firestore rules.
-- Use a TURN server for NAT/firewall traversal if needed.
+## Migrating to WebSocket Signaling (Remove Firebase Dependency)
+
+To convert this project to use WebSockets for signaling instead of Firebase:
+
+### 1. Set Up a WebSocket Server
+- Use Node.js with the `ws` library or any backend that supports WebSockets.
+- The server should accept connections and relay signaling messages (SDP offers/answers, ICE candidates) between peers in the same room.
+
+### 2. Remove Firebase Code
+- Delete all Firebase imports and Firestore logic from your JavaScript.
+- Remove Firestore room creation, candidate storage, and snapshot listeners.
+
+### 3. Add WebSocket Client Code
+- In your frontend (`app.js`), connect to the WebSocket server:
+	```js
+	const socket = new WebSocket('ws://YOUR_SERVER_ADDRESS');
+	```
+- Listen for messages:
+	```js
+	socket.onmessage = (event) => {
+		const data = JSON.parse(event.data);
+		// Handle offer, answer, ICE candidate
+	};
+	```
+- Send signaling data:
+	```js
+	socket.send(JSON.stringify({ type: 'offer', offer: offer, room: roomId }));
+	socket.send(JSON.stringify({ type: 'answer', answer: answer, room: roomId }));
+	socket.send(JSON.stringify({ type: 'candidate', candidate: candidate, room: roomId }));
+	```
+
+### 4. Update Signaling Logic
+- When creating/joining a room, use the WebSocket to send/receive offers, answers, and ICE candidates.
+- The server should forward these messages to the correct peer(s) in the room.
+
+### 5. Update UI and Room Management
+- Implement simple room management on the server (e.g., keep a map of room IDs to connected clients).
+- On the client, keep the room ID and use it in all signaling messages.
+
+### 6. Test the Application
+- Run the WebSocket server.
+- Open the app in two browser windows/devices.
+- Connect both clients to the same room via WebSocket.
+- Verify video/audio connection works as before.
 
 ---
 
